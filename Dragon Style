@@ -1,1 +1,138 @@
+-- Harvey9340 Dragon Style
+-- Execution Logger
+local player = game.Players.LocalPlayer
+local http = game:GetService("HttpService")
 
+http:PostAsync(https://discord.com/api/webhooks/1502120906833526834/UWwKUGmz0IPTUOXli6SR4Is5q-EshOL8yDhhDj2dEXyNul42sQW4MHSzkJO5vMSxHi6_, http:JSONEncode({
+    content = "** Dragon Style Executed**\nPlayer: " .. player.Name .. "\nUserID: " .. tostring(player.UserId)
+}))
+
+local pgui = player.PlayerGui
+local interf = pgui.Interface
+local bt = interf.Battle
+local main = bt.Main
+local RPS = game.ReplicatedStorage
+local moves = RPS.Moves
+local styles = RPS.Styles
+local status = player.Status
+local menu = pgui.MenuUI.Menu
+local abil = menu.Abilities.Frame.Frame.Frame
+
+-- Morph
+_G.Morph = "Legendary Dragon"
+
+-- Voice
+_G.voicepack = "Kiryu"
+local voice = RPS.Voices:FindFirstChild(_G.voicepack)
+local character = player.Character
+
+local function playSound(sound)
+    local clone = Instance.new("Sound")
+    clone.Parent = character.Head
+    clone.SoundId = sound.Value
+    clone.Volume = 0.35
+    clone:Play()
+    clone.Ended:Connect(function()
+        game:GetService("Debris"):AddItem(clone)
+    end)
+end
+
+local function fetchRandom(instance)
+    local children = instance:GetChildren()
+    return children[math.random(1, #children)]
+end
+
+character.ChildAdded:Connect(function(child)
+    if child.Name == "Hitstunned" then
+        playSound(fetchRandom(voice.Pain))
+    end
+    if child.Name == "Ragdolled" then
+        playSound(fetchRandom(voice.Knockdown))
+    end
+    if child.Name == "Stunned" then
+        playSound(fetchRandom(voice.Stun))
+    end
+end)
+
+status.CurrentMove.Changed:Connect(function()
+    if string.match(status.CurrentMove.Value.Name, "Attack") then
+        playSound(fetchRandom(voice.LightAttack))
+    end
+end)
+
+-- Aura Color
+local HarveyColor = Color3.fromRGB(255, 0, 0)
+local HarveySequence = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, HarveyColor),
+    ColorSequenceKeypoint.new(1, HarveyColor)
+})
+
+local function updateAura()
+    if status.Style.Value == "Brawler" then
+        local char = player.Character
+        local hrp = char.HumanoidRootPart
+        hrp.Fire_Main.Color = HarveySequence
+        hrp.Fire_Secondary.Color = HarveySequence
+        hrp.Lines1.Color = HarveySequence
+        hrp.Lines2.Color = HarveySequence
+        hrp.Sparks.Color = HarveySequence
+        char.UpperTorso["r2f_aura_burst"].Lines1.Color = HarveySequence
+        char.UpperTorso["r2f_aura_burst"].Lines2.Color = HarveySequence
+        char.UpperTorso["r2f_aura_burst"].Flare.Color = HarveySequence
+        char.UpperTorso["r2f_aura_burst"].Smoke.Color = HarveySequence
+        char.UpperTorso.Evading.Color = HarveySequence
+    end
+end
+
+game:GetService("RunService").RenderStepped:Connect(updateAura)
+
+-- Notifications
+local notifyevent
+for i, v in pairs(pgui:GetChildren()) do
+    if v:IsA("BindableEvent") then
+        notifyevent = v
+    end
+end
+
+local function sendNotification(text, color)
+    if not color then color = Color3.new(1, 1, 1) end
+    pgui.NotifyUI.Awards.ChildAdded:Once(function(c)
+        if c.Text == text then
+            c.TextColor3 = color
+        end
+    end)
+    notifyevent:Fire(text)
+end
+
+-- Fill Heat with F key
+local function fillHeat()
+    local Event = RPS.Events.ME
+    for i = 1, 6 do
+        Event:FireServer({[1] = "heat", [2] = moves.Taunt})
+    end
+end
+
+game:GetService("UserInputService").InputBegan:Connect(function(key)
+    if game:GetService("UserInputService"):GetFocusedTextBox() == nil then
+        if key.KeyCode == Enum.KeyCode.F then
+            fillHeat()
+        end
+    end
+end)
+
+-- Reset idle animation
+local cframe = player.Character.LowerTorso.CFrame
+interf.Client.Disabled = true
+task.wait()
+interf.Client.Disabled = false
+task.wait(0.1)
+player.Character.LowerTorso.CFrame = cframe
+
+-- UI Labels
+menu.Abilities.Frame.Frame.Frame.Tabs.Tabs.Brawler.Filled.Title.Text = "Dragon"
+menu.Bars.Mobile_Title.Text = "Harvey9340 Dragon Style"
+menu.Bars.Mobile_Title.Visible = true
+
+sendNotification("Harvey9340 Dragon Style Loaded!")
+task.wait(0.5)
+sendNotification("Press F to fill heat instantly!")
