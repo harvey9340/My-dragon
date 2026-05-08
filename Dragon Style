@@ -1,18 +1,11 @@
---[[
-  Custom Dragon Style Configuration
-  Style: "Legendary Dragon"
-  Author: harvey9340
-]]
-
 _G.DragonConfigurations = {
-  Moveset = "Classic",      -- Classic = Legendary Dragon moveset
-  MorphMod = true,          -- Enable morph modifications
-  VoiceMod = true,          -- Enable custom voice
-  CustomMorphSkin = true,   -- Enable custom skin
-  Experiments = false,      -- Keep off to preserve Classic stability
-  FeelTheHeat = true,       -- Keep the flame effects on
-  AuraSyncAddOn = true      -- Aura sync for a legendary glow
+  Moveset = "Classic",
+  MorphMod = true,
+  VoiceMod = true,
+  CustomMorphSkin = true,
+  Experiments = false,
+  FeelTheHeat = true,
+  AuraSyncAddOn = true
 }
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/harvey9340/My-dragon/main/Dragon%20Style"))();
-				
+loadstring(game:HttpGet("https://raw.githubusercontent.com/ducksy9340/R2FModding/main/Dragon%20style.lua"))();
