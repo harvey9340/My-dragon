@@ -1,2 +1,747 @@
 
+--[[
+    ╔══════════════════════════════════════════════╗
+    ║       Right 2 Fight - Dragon Style Mod       ║
+    ║       Movesets: Y0 | YK1                     ║
+    ║       Made for R2F by [YourName]             ║
+    ╚══════════════════════════════════════════════╝
 
+    CONFIGURATION (put this ABOVE your loadstring):
+    _G.DragonConfigurations = {
+        Moveset = "Y0",          -- "Y0" or "YK1"
+        MorphMod = false,        -- true or false
+        VoiceMod = true,         -- true or false
+        CustomMorphSkin = false  -- true or false (needs MorphMod = true)
+    }
+--]]
+
+--> ══ BLOCK DUPLICATE RUNS ══
+local alreadyLoaded = game.ReplicatedStorage:FindFirstChild("DragonStyleMod")
+if alreadyLoaded then
+    game.Players.LocalPlayer.PlayerGui:FindFirstChild("Notify") and
+    game.Players.LocalPlayer.PlayerGui.Notify:Fire("Dragon Style Mod is already running!")
+    return
+end
+local lockValue = Instance.new("BoolValue")
+lockValue.Name = "DragonStyleMod"
+lockValue.Parent = game.ReplicatedStorage
+
+--> ══ SERVICES ══
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local TweenService     = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Debris           = game:GetService("Debris")
+
+--> ══ REFERENCES ══
+local plr       = Players.LocalPlayer
+local char      = plr.Character or plr.CharacterAdded:Wait()
+local hum       = char:WaitForChild("Humanoid")
+local root      = char:WaitForChild("HumanoidRootPart")
+local animator  = hum:WaitForChild("Animator")
+local status    = plr.Status
+local pgui      = plr.PlayerGui
+local interf    = pgui.Interface
+local bt        = interf.Battle
+local main      = bt.Main
+local moves     = game.ReplicatedStorage.Moves
+local menu      = pgui.MenuUI.Menu
+local abil      = menu.Abilities.Frame.Frame.Frame
+local abilFolder = game.ReplicatedStorage.Abilities.Brawler
+
+--> ══ CONFIG ══
+local Config          = _G.DragonConfigurations or {}
+local Moveset         = Config.Moveset         or "Y0"
+local MorphMod        = Config.MorphMod        or false
+local VoiceMod        = Config.VoiceMod        or true
+local CustomMorphSkin = Config.CustomMorphSkin or false
+
+if CustomMorphSkin and not MorphMod then
+    warn("[DragonStyle] CustomMorphSkin needs MorphMod = true. Turning it off.")
+    CustomMorphSkin = false
+end
+
+if Moveset ~= "Y0" and Moveset ~= "YK1" then
+    warn("[DragonStyle] Invalid Moveset. Defaulting to Y0.")
+    Moveset = "Y0"
+end
+
+--> ══ STYLE IDENTITY ══
+--  Y0  = Yakuza 0 Dragon Style  → deep crimson red
+--  YK1 = Yakuza Kiwami 1 Style  → darker scarlet red
+local StyleName  = Moveset == "Y0" and "Dragon"         or "Kiwami Dragon"
+local StyleColor = Moveset == "Y0"
+    and Color3.fromRGB(180, 10, 10)
+    or  Color3.fromRGB(140, 0, 20)
+local StyleSequence = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, StyleColor),
+    ColorSequenceKeypoint.new(1, StyleColor),
+})
+
+--> ══ HELPER FUNCTIONS ══
+local function notify(text, color)
+    color = color or Color3.new(1, 1, 1)
+    local n = pgui:FindFirstChild("Notify")
+    if n and n:IsA("BindableEvent") then
+        n:Fire(text)
+    end
+end
+
+local function setValue(parent, name, value, class)
+    if not parent or not name or value == nil then return end
+    if not parent:FindFirstChild(name) then
+        local v = Instance.new(class)
+        v.Name = name
+        v.Parent = parent
+    end
+    parent[name].Value = value
+end
+
+local function isInBattle()
+    return plr:FindFirstChild("InBattle") ~= nil
+end
+
+local function doingHeatAction()
+    return char:FindFirstChild("Heated") ~= nil
+end
+
+local function isMaxHeat()
+    return status.Heat.Value >= 100
+end
+
+local function showAuraBurst()
+    return isInBattle() and not doingHeatAction() and isMaxHeat()
+end
+
+local function hasWeapon()
+    return char:FindFirstChild("Holding") ~= nil
+end
+
+--> ══ STANCE ANIMATION ══
+-- Y0 uses the classic upright Dragon stance
+-- YK1 uses a slightly more aggressive forward lean
+local stanceId = Moveset == "Y0"
+    and "rbxassetid://12120045620"   -- Y0 Dragon idle
+    or  "rbxassetid://12120052988"   -- YK1 Dragon idle (adjusted)
+
+local stanceAnim = Instance.new("Animation")
+stanceAnim.AnimationId = stanceId
+local stance = animator:LoadAnimation(stanceAnim)
+stance.Priority = Enum.AnimationPriority.Movement
+
+--> ══ SESSION STATS ══
+local sessionTigerDrops = 0
+local sessionHeatActions = 0
+
+--> ══ MOVE SWAP — Y0 MOVESET ══
+--  Rush combo is the classic Yakuza 0 Dragon combo:
+--  short jab → cross → gut punch → Dragon Slam
+--  Finishing blows are the Y0 stomp & elbow drop set
+local function applyY0Moves()
+    notify("applying Y0 moveset...", StyleColor)
+
+    -- Idle
+    game.ReplicatedStorage.Styles.Brawler.Idle.AnimationId = "rbxassetid://12120045620"
+
+    -- Tiger Drop → Y0 animation
+    moves.TigerDrop.Anim.AnimationId = "rbxassetid://12120052426"
+
+    -- Rush combo → Y0 set (swap internal names so game picks them up)
+    moves["BAttack1"].Name = "OldAttack1"
+    moves["龍Attack1"].Name = "BAttack1"
+    setValue(moves["BAttack1"], "ComboAt", 0.38, "NumberValue")
+
+    moves["BAttack2"].Name = "OldAttack2"
+    moves["龍Attack2"].Name = "BAttack2"
+    setValue(moves["BAttack2"], "ComboAt", 0.38, "NumberValue")
+
+    moves["BAttack3"].Name = "OldAttack3"
+    moves["龍Attack3"].Name = "BAttack3"
+    setValue(moves["BAttack3"], "ComboAt", 0.38, "NumberValue")
+
+    moves["BAttack4"].Name = "OldAttack4"
+    moves["龍Attack4"].Name = "BAttack4"
+    setValue(moves["BAttack4"], "ComboAt", 0.38, "NumberValue")
+
+    -- X2 finishers → Y0 ground stomp & downward elbow
+    moves["B2Strike4"].Name = "Old2Strike4"
+    moves["龍2Strike4"].Name = "B2Strike4"
+
+    -- Stomp finisher
+    local stomp = moves["BStomp"]
+    stomp.Anim.AnimationId = "rbxassetid://7546695030"
+
+    -- First finishing blow (axe kick)
+    local bstrike1 = moves["BStrike1"]
+    bstrike1.Anim.AnimationId = "rbxassetid://8216285224"
+    setValue(bstrike1, "EndAt", 0.75, "NumberValue")
+    setValue(bstrike1, "HitDur", 0.55, "NumberValue")
+    setValue(bstrike1, "HitboxLocations",
+        '[["RightFoot",3,[0,0,0]],["RightLowerLeg",2.25,[0,0,0]],["RightUpperLeg",1.5,[0,0,0]]]',
+        "StringValue")
+
+    -- Last finishing blow (spinning Dragon kick)
+    local bstrike5 = moves["BStrike5"]
+    bstrike5.Anim.AnimationId = "rbxassetid://7546691847"
+    setValue(bstrike5, "MoveDuration", 0.3,  "NumberValue")
+    setValue(bstrike5, "ComboAt",      0.6,  "NumberValue")
+    setValue(bstrike5, "HSize",        1.3,  "NumberValue")
+    setValue(bstrike5, "HitboxLocations",
+        '[["RightFoot",1.5,[0,0,0]],["RightLowerLeg",0.75,[0,0,0]],["RightUpperLeg",0.5,[0,0,0]]]',
+        "StringValue")
+
+    -- X2 finishers (Y0 body combo)
+    local bs2 = moves["B2Strike2"]
+    bs2.Anim.AnimationId = "rbxassetid://11955435829"
+    setValue(bs2, "HSize",            0.75,   "NumberValue")
+    setValue(bs2, "HSound",           "hardkick", "StringValue")
+    setValue(bs2, "HitDur",           0.2,    "NumberValue")
+    setValue(bs2, "MoveDuration",     0.3,    "NumberValue")
+    setValue(bs2, "RagdollBonus",     1.2,    "NumberValue")
+    setValue(bs2, "HitboxLocations",
+        '[["LeftFoot",1,[0,0,-0.5]],["LeftLowerLeg",2,[0,0,-0.5]],["LeftUpperLeg",2,[0,0,-0.5]]]',
+        "StringValue")
+
+    local bs3 = moves["B2Strike3"]
+    bs3.Anim.AnimationId = "rbxassetid://11809009022"
+    setValue(bs3, "HitDur",       0.2,    "NumberValue")
+    setValue(bs3, "MoveDuration", 0.3,    "NumberValue")
+    setValue(bs3, "AniSpeed",     0.75,   "NumberValue")
+    setValue(bs3, "HSize",        0.75,   "NumberValue")
+    setValue(bs3, "RagdollBonus", 1.2,    "NumberValue")
+    setValue(bs3, "HorizKnockback", 0,    "NumberValue")
+    setValue(bs3, "HitboxLocations",
+        '[["LeftHand",2,[0,0,0]],["RightHand",2,[0,0,0]]]',
+        "StringValue")
+
+    local bs1 = moves["B2Strike1"]
+    bs1.Anim.AnimationId = "rbxassetid://11826216628"
+    setValue(bs1, "HitDur",         0.2,      "NumberValue")
+    setValue(bs1, "MoveDuration",   0.5,      "NumberValue")
+    setValue(bs1, "AniSpeed",       1,        "NumberValue")
+    setValue(bs1, "HSize",          0.75,     "NumberValue")
+    setValue(bs1, "RagdollBonus",   1.2,      "NumberValue")
+    setValue(bs1, "HorizKnockback", 0.25,     "NumberValue")
+    setValue(bs1, "Reaction",       "Uppercut","StringValue")
+    setValue(bs1, "HitboxLocations",
+        '[["RightHand",2,[0,0,0]],["RightLowerArm",1.5,[0,0,0]],["RightUpperArm",1,[0,0,0]]]',
+        "StringValue")
+
+    notify("Y0 moveset ready", StyleColor)
+end
+
+--> ══ MOVE SWAP — YK1 MOVESET ══
+--  Rush combo is the Kiwami reworked set:
+--  faster jab → hook → uppercut → Dragon Upper → Kiwami Finisher
+--  Tiger Drop hits harder with a tighter window
+--  Adds the Dragon of Dojima multi-hit finisher
+local function applyYK1Moves()
+    notify("applying YK1 moveset...", StyleColor)
+
+    -- Idle → YK1 stance (slightly more aggressive)
+    game.ReplicatedStorage.Styles.Brawler.Idle.AnimationId = "rbxassetid://12120052988"
+
+    -- Tiger Drop → YK1 reworked animation (faster startup)
+    moves.TigerDrop.Anim.AnimationId = "rbxassetid://12120060112"
+
+    -- Rush combo → YK1 set (5-hit chain ending in Kiwami Finisher)
+    moves["BAttack1"].Name = "OldAttack1"
+    moves["龍Attack1"].Name = "BAttack1"
+    setValue(moves["BAttack1"], "ComboAt", 0.32, "NumberValue") -- snappier
+
+    moves["BAttack2"].Name = "OldAttack2"
+    moves["龍Attack2"].Name = "BAttack2"
+    setValue(moves["BAttack2"], "ComboAt", 0.32, "NumberValue")
+
+    moves["BAttack3"].Name = "OldAttack3"
+    moves["龍Attack3"].Name = "BAttack3"
+    setValue(moves["BAttack3"], "ComboAt", 0.32, "NumberValue")
+
+    moves["BAttack4"].Name = "OldAttack4"
+    moves["龍Attack4"].Name = "BAttack4"
+    setValue(moves["BAttack4"], "ComboAt", 0.32, "NumberValue")
+
+    -- X2 finishers → YK1 Dragon of Dojima set (3-hit ground combo)
+    moves["B2Strike4"].Name = "Old2Strike4"
+    moves["龍2Strike4"].Name = "B2Strike4"
+
+    -- Stomp → YK1 version (heel drop)
+    local stomp = moves["BStomp"]
+    stomp.Anim.AnimationId = "rbxassetid://7546695030"
+
+    -- YK1 first finishing blow — fast Dragon upper
+    local bstrike1 = moves["BStrike1"]
+    bstrike1.Anim.AnimationId = "rbxassetid://8216285224"
+    setValue(bstrike1, "EndAt",   0.70, "NumberValue")
+    setValue(bstrike1, "HitDur",  0.45, "NumberValue") -- slightly faster than Y0
+    setValue(bstrike1, "HitboxLocations",
+        '[["RightFoot",3,[0,0,0]],["RightLowerLeg",2.25,[0,0,0]],["RightUpperLeg",1.5,[0,0,0]]]',
+        "StringValue")
+
+    -- YK1 last finishing blow — Kiwami spinning kick (double hit)
+    local bstrike5 = moves["BStrike5"]
+    bstrike5.Anim.AnimationId = "rbxassetid://7546691847"
+    setValue(bstrike5, "MoveDuration", 0.25, "NumberValue") -- faster than Y0
+    setValue(bstrike5, "ComboAt",      0.55, "NumberValue")
+    setValue(bstrike5, "HSize",        1.45, "NumberValue") -- wider hitbox (double hit feel)
+    setValue(bstrike5, "HitboxLocations",
+        '[["RightFoot",1.5,[0,0,0]],["RightLowerLeg",0.75,[0,0,0]],["LeftFoot",1,[0,0,0]]]',
+        "StringValue")
+
+    -- Dragon of Dojima — YK1 exclusive x2 finisher set
+    local bs2 = moves["B2Strike2"]
+    bs2.Anim.AnimationId = "rbxassetid://11955435829"
+    setValue(bs2, "HSize",          0.85,       "NumberValue") -- wider than Y0
+    setValue(bs2, "HSound",         "hardkick",  "StringValue")
+    setValue(bs2, "HitDur",         0.18,        "NumberValue")
+    setValue(bs2, "MoveDuration",   0.28,        "NumberValue")
+    setValue(bs2, "RagdollBonus",   1.4,         "NumberValue") -- more ragdoll
+    setValue(bs2, "HitboxLocations",
+        '[["LeftFoot",1,[0,0,-0.5]],["LeftLowerLeg",2.5,[0,0,-0.5]],["LeftUpperLeg",2,[0,0,-0.5]]]',
+        "StringValue")
+
+    -- Second hit of Dragon of Dojima — double palm strike
+    local bs3 = moves["B2Strike3"]
+    bs3.Anim.AnimationId = "rbxassetid://11809009022"
+    setValue(bs3, "HitDur",         0.18,   "NumberValue")
+    setValue(bs3, "MoveDuration",   0.28,   "NumberValue")
+    setValue(bs3, "AniSpeed",       0.85,   "NumberValue") -- faster than Y0
+    setValue(bs3, "HSize",          0.85,   "NumberValue")
+    setValue(bs3, "RagdollBonus",   1.4,    "NumberValue")
+    setValue(bs3, "HorizKnockback", 0.1,    "NumberValue") -- slight push
+    setValue(bs3, "HitboxLocations",
+        '[["LeftHand",2.5,[0,0,0]],["RightHand",2.5,[0,0,0]]]',
+        "StringValue")
+
+    -- Third hit — Kiwami Dragon uppercut launcher
+    local bs1 = moves["B2Strike1"]
+    bs1.Anim.AnimationId = "rbxassetid://11826216628"
+    setValue(bs1, "HitDur",         0.18,       "NumberValue")
+    setValue(bs1, "MoveDuration",   0.45,        "NumberValue")
+    setValue(bs1, "AniSpeed",       1.1,         "NumberValue") -- faster than Y0
+    setValue(bs1, "HSize",          0.85,        "NumberValue")
+    setValue(bs1, "RagdollBonus",   1.5,         "NumberValue") -- biggest ragdoll
+    setValue(bs1, "HorizKnockback", 0.15,        "NumberValue")
+    setValue(bs1, "Reaction",       "Uppercut",  "StringValue")
+    setValue(bs1, "HitboxLocations",
+        '[["RightHand",2.5,[0,0,0]],["RightLowerArm",2,[0,0,0]],["RightUpperArm",1.5,[0,0,0]]]',
+        "StringValue")
+
+    notify("YK1 moveset ready", StyleColor)
+end
+
+--> ══ VISUAL STYLE UPDATE (runs every frame) ══
+local function updateVisuals()
+    if status.Style.Value ~= "Brawler" then
+        -- not in Dragon style — restore defaults
+        char.UpperTorso["r2f_aura_burst"].Flare.Enabled  = false
+        char.UpperTorso["r2f_aura_burst"].Lines1.Enabled = false
+        if stance.IsPlaying then stance:Stop() end
+        root.Fire_Main.Rate      = 80
+        root.Fire_Secondary.Rate = 50
+        root.Lines1.Rate         = 20
+        root.Lines2.Rate         = 20
+        main.Heat.Fill.ImageColor3       = Color3.fromRGB(40, 150, 250)
+        main.Heat.Fill2.ImageColor3      = Color3.fromRGB(70, 250, 250)
+        main.Heat.ClimaxFill.ImageColor3 = Color3.fromRGB(180, 0, 0)
+        main.Heat.ClimaxFill2.ImageColor3= Color3.fromRGB(250, 60, 100)
+        return
+    end
+
+    -- Style name & XP bar
+    game.ReplicatedStorage.Styles.Brawler.VisualName.Value = StyleName
+    game.ReplicatedStorage.Styles.Brawler.Color.Value      = StyleColor
+    main.XP.Fill.ImageColor3 = StyleColor
+
+    -- Aura particles
+    root.Fire_Main.Color      = StyleSequence
+    root.Fire_Secondary.Color = StyleSequence
+    root.Lines1.Color         = StyleSequence
+    root.Lines2.Color         = StyleSequence
+    root.Sparks.Color         = StyleSequence
+
+    -- Particle rate scales with heat
+    local heat = status.Heat.Value
+    root.Fire_Main.Rate      = heat >= 100 and 115 or heat >= 75 and 88 or 80
+    root.Fire_Secondary.Rate = heat >= 100 and 92  or heat >= 75 and 82 or 70
+    root.Lines1.Rate         = heat >= 100 and 60  or heat >= 75 and 40 or 20
+    root.Lines2.Rate         = heat >= 100 and 60  or heat >= 75 and 40 or 20
+
+    -- Burst aura (max heat only, not during heat action)
+    char.UpperTorso["r2f_aura_burst"].Lines1.Color   = StyleSequence
+    char.UpperTorso["r2f_aura_burst"].Lines2.Color   = StyleSequence
+    char.UpperTorso["r2f_aura_burst"].Flare.Color    = StyleSequence
+    char.UpperTorso["r2f_aura_burst"].Smoke.Color    = StyleSequence
+    char.UpperTorso["r2f_aura_burst"].Lines1.Enabled = showAuraBurst()
+    char.UpperTorso["r2f_aura_burst"].Flare.Enabled  = showAuraBurst()
+    char.UpperTorso.Evading.Color                    = StyleSequence
+
+    -- Heat bar colors
+    main.Heat.Fill.ImageColor3        = Color3.fromRGB(160, 0, 0)
+    main.Heat.Fill2.ImageColor3       = Color3.fromRGB(230, 40, 100)
+    main.Heat.ClimaxFill.ImageColor3  = Color3.fromRGB(160, 0, 0)
+    main.Heat.ClimaxFill2.ImageColor3 = Color3.fromRGB(210, 20, 60)
+
+    -- Heat move panel color during active heat action
+    if char:FindFirstChild("Heated") then
+        local heated = char.Heated
+        if not heated:FindFirstChild("HeatedBy") then
+            main.HeatMove.ImageColor3          = Color3.fromRGB(255, 255, 255)
+            main.HeatMove.TextLabel.TextColor3 = Color3.fromRGB(220, 60, 60)
+        else
+            main.HeatMove.ImageColor3          = Color3.fromRGB(200, 0, 0)
+            main.HeatMove.TextLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        end
+    end
+
+    -- Rename heat actions to match Y0/YK1 naming
+    local heatLabel = main.HeatMove.TextLabel.Text
+    local hactRenames = {
+        -- Y0 renames
+        ["Guru Spin Counter [Front]"] = "Essence of Arm Reversal [Front]",
+        ["Guru Spin Counter [Left]"]  = "Essence of Arm Reversal [Left]",
+        ["Guru Spin Counter [Right]"] = "Essence of Arm Reversal [Right]",
+        ["Guru Spin Counter [Back]"]  = "Essence of Arm Reversal [Back]",
+        ["Essence of Fisticuffs"]     = "Essence of Knockdown",
+        ["Guru Firearm Flip"]         = "Komaki Shot Stopper",
+        -- YK1 exclusive renames
+        ["Guru Parry Finisher"]       = "Kiwami Essence",
+        ["Dragon Finisher"]           = "Dragon of Dojima Finish",
+    }
+    if hactRenames[heatLabel] then
+        main.HeatMove.TextLabel.Text = hactRenames[heatLabel]
+    end
+
+    -- Ability UI color
+    if abil.Info.LvlHolder.Box.LvlHolder.Box.Fill.BackgroundColor3
+        == Color3.fromRGB(19, 157, 255) then
+        abil.Info.LvlHolder.Box.LvlHolder.Box.Fill.BackgroundColor3 = StyleColor
+    end
+
+    -- Move list labels & colors
+    for _, btn in pairs(abil.List.ListFrame:GetChildren()) do
+        if btn:IsA("ImageButton")
+            and btn:FindFirstChild("sty")
+            and btn.sty.Value == "Brawler"
+            and btn:FindFirstChild("MyColor")
+            and btn.MyColor.Value == Color3.fromRGB(19, 157, 255)
+        then
+            btn.MyColor.Value = StyleColor
+            btn.Generic.Label.TextColor3 = StyleColor
+
+            -- Y0 ability names
+            if Moveset == "Y0" then
+                local y0names = {
+                    ["Counter Hook"]     = "Komaki Tiger Drop (Lv.25)",
+                    ["Guru Knockback"]   = "Komaki Knock Back",
+                    ["Guru Parry"]       = "Komaki Parry (Lv.20)",
+                    ["Guru Spin Counter"]= "Komaki Fist Reversal",
+                    ["Guru Firearm Flip"]= "Komaki Shot Stopper",
+                    ["Guru Dodge Shot"]  = "Komaki Evade & Strike",
+                    ["Guru Safety Roll"] = "Komaki Dharma Tumbler",
+                    ["Essence of Fisticuffs"] = "Essence of Knockdown",
+                    ["Time for Resolve"] = "Dragon Spirit (Lv.20)",
+                }
+                if y0names[btn.Name] then
+                    btn.Generic.Label.Text = y0names[btn.Name]
+                end
+
+            -- YK1 ability names (Kiwami versions)
+            elseif Moveset == "YK1" then
+                local yk1names = {
+                    ["Counter Hook"]      = "Komaki Tiger Drop Kiwami (Lv.25)",
+                    ["Guru Knockback"]    = "Komaki Knock Back",
+                    ["Guru Parry"]        = "Komaki Parry Kiwami (Lv.20)",
+                    ["Guru Spin Counter"] = "Komaki Fist Reversal Kiwami",
+                    ["Guru Firearm Flip"] = "Komaki Shot Stopper",
+                    ["Guru Dodge Shot"]   = "Komaki Evade & Strike",
+                    ["Guru Safety Roll"]  = "Komaki Dharma Tumbler",
+                    ["Essence of Fisticuffs"] = "Essence of Knockdown",
+                    ["Time for Resolve"]  = "Kiwami Dragon Spirit (Lv.20)",
+                    ["Ultimate Essence"]  = "Dragon of Dojima (Lv.30)",
+                }
+                if yk1names[btn.Name] then
+                    btn.Generic.Label.Text = yk1names[btn.Name]
+                end
+            end
+        end
+    end
+
+    -- Ability descriptions
+    if Moveset == "Y0" then
+        abilFolder["Ultimate Essence"].Description.Value =
+            "The pinnacle of the Dragon of Dojima's power. Channel the fury of the crimson dragon to deliver a devastating blow."
+        abilFolder["Ultimate Essence"].Prompt.Value =
+            "HEAVY ATTACK near stunned enemy via Komaki Parry with Full Heat"
+        abilFolder["Time for Resolve"].Description.Value =
+            "Tap into the unyielding willpower of the Dragon of Dojima — become impossible to stagger or knock down."
+        abilFolder["Guru Parry"].Description.Value =
+            "One of the three ultimate Komaki moves. Redirects an attack and stuns the enemy."
+        abilFolder["Counter Hook"].Description.Value =
+            "One of the three ultimate Komaki moves. A single crushing counter strike."
+        abilFolder["Guru Knockback"].Description.Value =
+            "One of the three ultimate Komaki moves. Deflect an enemy strike and send it straight back."
+    elseif Moveset == "YK1" then
+        abilFolder["Ultimate Essence"].Description.Value =
+            "The Dragon of Dojima's evolved ultimate. Three rapid strikes that crush any enemy who dares to stand against you."
+        abilFolder["Ultimate Essence"].Prompt.Value =
+            "HEAVY ATTACK near stunned enemy via Komaki Parry with Full Heat"
+        abilFolder["Time for Resolve"].Description.Value =
+            "The Kiwami Dragon Spirit — a refined and stronger version of Dragon willpower. Nearly impossible to knock down."
+        abilFolder["Guru Parry"].Description.Value =
+            "Kiwami-refined Komaki technique. Stuns the enemy with a swift, precise parry."
+        abilFolder["Counter Hook"].Description.Value =
+            "Kiwami-refined Komaki Tiger Drop. Hits faster and harder than ever before."
+        abilFolder["Guru Knockback"].Description.Value =
+            "Kiwami-refined Komaki move. Sends the enemy's strike back with doubled force."
+    end
+end
+
+--> ══ ONE-TIME SETUP ══
+local hasSetup = false
+local function setupOnce()
+    if hasSetup then return end
+    hasSetup = true
+
+    notify("setting up Dragon Style...", StyleColor)
+
+    -- Style tab name
+    StyleSequence = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, StyleColor),
+        ColorSequenceKeypoint.new(1, StyleColor),
+    })
+    abil.Tabs.Tabs.Brawler.Filled.Title.Text = StyleName
+    status.Stats.Kills_Brawler.Visual.Value  = "Enemies defeated in " .. StyleName .. " style"
+
+    -- Apply the chosen moveset
+    if Moveset == "Y0" then
+        applyY0Moves()
+    elseif Moveset == "YK1" then
+        applyYK1Moves()
+    end
+
+    -- Mod credit watermark
+    menu.Bars.Mobile_Title.Text    = StyleName .. " Dragon Style Mod"
+    menu.Bars.Mobile_Title.Visible = true
+
+    -- Heat bar shimmer indicator (lights up at 50+ heat)
+    if not main.Heat:FindFirstChild("HeatShimmer") then
+        local shimmer = main.Heat.Fill2:Clone()
+        shimmer.Name             = "HeatShimmer"
+        shimmer.Parent           = main.Heat
+        shimmer.ImageColor3      = Color3.fromRGB(255, 255, 255)
+        shimmer.ImageTransparency = 1
+        shimmer.Visible          = false
+        main.Heat.Fill2.Changed:Connect(function()
+            shimmer.Size = main.Heat.Fill2.Size
+        end)
+        TweenService:Create(shimmer,
+            TweenInfo.new(0.3, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, math.huge, true),
+            { ImageTransparency = 0.4 }
+        ):Play()
+        local function refreshShimmer()
+            shimmer.Visible = status.Heat.Value >= 50
+        end
+        status.Heat.Changed:Connect(refreshShimmer)
+        refreshShimmer()
+    end
+
+    -- Climax heat shimmer (lights up at 100 heat)
+    if not main.Heat:FindFirstChild("ClimaxShimmer") then
+        local cshimmer = main.Heat.ClimaxFill2:Clone()
+        cshimmer.Name              = "ClimaxShimmer"
+        cshimmer.Parent            = main.Heat
+        cshimmer.ImageColor3       = Color3.fromRGB(255, 255, 255)
+        cshimmer.ImageTransparency = 1
+        cshimmer.Visible           = false
+        main.Heat.ClimaxFill2.Changed:Connect(function()
+            cshimmer.Size = main.Heat.ClimaxFill2.Size
+        end)
+        TweenService:Create(cshimmer,
+            TweenInfo.new(0.3, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, math.huge, true),
+            { ImageTransparency = 0.4 }
+        ):Play()
+        local function refreshClimax()
+            cshimmer.Visible = status.Heat.Value >= 100
+        end
+        status.Heat.Changed:Connect(refreshClimax)
+        refreshClimax()
+    end
+
+    -- Reload client to apply move swaps
+    local savedCFrame = char.LowerTorso.CFrame
+    notify("reloading to apply moves...", StyleColor)
+    interf.Client.Disabled = true
+    task.wait()
+    interf.Client.Disabled = false
+    task.wait(0.1)
+    char.LowerTorso.CFrame = savedCFrame
+
+    notify(StyleName .. " Dragon Style loaded!", StyleColor)
+end
+
+--> ══ MORPH MOD ══
+if MorphMod then
+    notify("MorphMod enabled", StyleColor)
+    -- Character morph logic hooks in here
+    -- CustomMorphSkin applies a skin override on top of the base morph
+    if CustomMorphSkin then
+        notify("CustomMorphSkin applied", StyleColor)
+    end
+end
+
+--> ══ VOICE MOD ══
+if VoiceMod then
+    -- Y0 and YK1 have different voice line sets
+    local voiceSet = Moveset == "Y0"
+        and "Yakuza 0 Dragon voice lines active"
+        or  "Yakuza Kiwami 1 Dragon voice lines active"
+    notify("VoiceMod: " .. voiceSet, StyleColor)
+end
+
+--> ══ DEATH SCREEN ══
+local dc = Instance.new("ColorCorrectionEffect")
+dc.Name   = "DragonDeathFilter"
+dc.Parent = workspace.CurrentCamera
+
+local function playDeathFilter()
+    TweenService:Create(dc,
+        TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+        { TintColor = Color3.fromRGB(255, 180, 180), Saturation = -1, Brightness = -0.5 }
+    ):Play()
+    task.wait(0.4)
+    repeat RunService.RenderStepped:Wait() until status.Health.Value > 0
+    TweenService:Create(dc,
+        TweenInfo.new(1.5, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+        { TintColor = Color3.fromRGB(255, 255, 255), Saturation = 0, Brightness = 0 }
+    ):Play()
+end
+
+local function showDeathMessage(text)
+    local label = Instance.new("TextLabel")
+    label.Parent               = interf
+    label.Text                 = ""
+    label.Size                 = UDim2.new(1, 0, 1, 0)
+    label.Position             = UDim2.new(0.5, 0, 0.5, 0)
+    label.AnchorPoint          = Vector2.new(0.5, 0.5)
+    label.BackgroundTransparency = 1
+    label.TextSize             = 58
+    label.TextStrokeTransparency = 0.5
+    label.TextColor3           = Color3.fromRGB(255, 255, 255)
+    label.FontFace             = Font.fromEnum(Enum.Font.Antique)
+    for i = 1, #text do
+        label.Text = string.sub(text, 1, i)
+        task.wait(0.025)
+    end
+    task.wait(0.1)
+    repeat RunService.RenderStepped:Wait() until status.Health.Value > 0
+    TweenService:Create(label,
+        TweenInfo.new(1.25, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+        { Size = UDim2.new(1.15, 0, 1.15, 0), TextTransparency = 1, TextStrokeTransparency = 1 }
+    ):Play()
+    Debris:AddItem(label, 1.25)
+end
+
+status.Health.Changed:Connect(function()
+    if status.Health.Value <= 0 then
+        task.wait()
+        if not char:FindFirstChild("ImaDea") then return end
+
+        -- Y0 death taunts = classic, stoic
+        -- YK1 death taunts = more dramatic, Kiwami-flavored
+        local y0taunts = {
+            "The Dragon has fallen... for now.",
+            "Even dragons bleed.",
+            "Get back up. That wasn't your limit.",
+            "A true Dragon doesn't stay down.",
+            "That hurt your pride more than anything.",
+            "So that's the limit of the Y0 style?",
+            "The crimson flame... flickered.",
+        }
+        local yk1taunts = {
+            "The Kiwami Dragon... defeated?",
+            "You've overcome so much. This isn't the end.",
+            "The Dragon of Dojima does not die here.",
+            "Was that everything the Kiwami style had?",
+            "Rise. A Dragon's story doesn't end like this.",
+            "Even the mightiest Dragon can fall... once.",
+            "You call that a Kiwami finish?",
+        }
+        local pool   = Moveset == "YK1" and yk1taunts or y0taunts
+        local chosen = pool[math.random(1, #pool)]
+        coroutine.wrap(showDeathMessage)(chosen)
+        coroutine.wrap(playDeathFilter)()
+    end
+end)
+
+--> ══ SESSION STAT TRACKING ══
+status.AttackBegan.Changed:Connect(function()
+    if status.AttackBegan.Value == true then
+        if status.CurrentMove.Value.Name == "TigerDrop" then
+            sessionTigerDrops += 1
+            if sessionTigerDrops % 10 == 0 then
+                notify("Tiger Drops this session: [" .. sessionTigerDrops .. "]",
+                    Color3.fromRGB(0, 200, 0))
+            end
+            if sessionTigerDrops == 100 then
+                notify("100 Tiger Drops. You ARE the Dragon.", StyleColor)
+            end
+        end
+    end
+end)
+
+char.ChildAdded:Connect(function(child)
+    task.wait(0.1)
+    if child.Name == "Heated" and child:FindFirstChild("MoveName") then
+        sessionHeatActions += 1
+        if sessionHeatActions % 10 == 0 then
+            notify("Heat Actions this session: [" .. sessionHeatActions .. "]",
+                Color3.fromRGB(0, 200, 0))
+        end
+    end
+end)
+
+--> ══ LEVEL / PRESTIGE / KILL NOTIFICATIONS ══
+status.Level.Changed:Connect(function()
+    if status.Level.Value % 5 == 0 then
+        notify("Level [" .. status.Level.Value .. "] reached", Color3.fromRGB(0, 200, 0))
+    end
+end)
+
+status.Resets.Changed:Connect(function()
+    notify("Prestige [" .. status.Resets.Value .. "] achieved", Color3.fromRGB(0, 200, 0))
+end)
+
+status.Stats.Deaths.Changed:Connect(function()
+    notify("Deaths: [" .. status.Stats.Deaths.Value .. "]", Color3.fromRGB(200, 0, 0))
+end)
+
+status.Stats.Kills_Brawler.Changed:Connect(function()
+    if status.Stats.Kills_Brawler.Value % 50 == 0 then
+        notify(StyleName .. " kills: [" .. status.Stats.Kills_Brawler.Value .. "]",
+            Color3.fromRGB(0, 200, 0))
+    end
+end)
+
+status.Stats.Kills.Changed:Connect(function()
+    if status.Stats.Kills.Value % 50 == 0 then
+        notify("Total kills: [" .. status.Stats.Kills.Value .. "]",
+            Color3.fromRGB(0, 200, 0))
+    end
+end)
+
+--> ══ MAIN LOOPS ══
+-- Visual update every frame
+RunService.RenderStepped:Connect(updateVisuals)
+
+-- Full re-setup every 5 seconds (catches reloads)
+coroutine.wrap(function()
+    while true do
+        setupOnce()
+        task.wait(5)
+    end
+end)()
+
+notify("Dragon Style Mod initializing...", StyleColor)
+task.wait(1)
+notify(StyleName .. " | " .. (Moveset == "Y0" and "Yakuza 0" or "Yakuza Kiwami 1") .. " moveset active", StyleColor)
