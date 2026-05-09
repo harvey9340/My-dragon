@@ -6,7 +6,7 @@
     ║       Made for R2F by [YourName]             ║
     ╚══════════════════════════════════════════════╝
 
-    CONFIGURATION (put this ABOVE your loadstring):
+    CONFIGURATION :
     _G.DragonConfigurations = {
         Moveset = "Y0",          -- "Y0" or "YK1"
         MorphMod = false,        -- true or false
