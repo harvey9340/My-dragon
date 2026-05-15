@@ -1,1 +1,1051 @@
+--[[
+This is my own Dragon Style mod for Right 2 Fight.
+Please use loadstring for this mod.
 
+Put this above your loadstring before running.
+_G.DragonConfigurations = {
+  Moveset = "Y0", -- Y0 or YK1
+  MorphMod = false, -- true or false
+  VoiceMod = true, -- true or false
+  CustomMorphSkin = false, -- true or false
+  FeelTheHeat = true, -- true or false
+  AuraSyncAddOn = true -- true or false
+}
+Y0 is the Yakuza 0 Dragon Style moveset.
+YK1 is the Yakuza Kiwami 1 Dragon Style moveset.
+CustomMorphSkin only works if MorphMod is set to true.
+Enjoy the mod.
+--]]
+
+-- ══════════════════════════════════
+--   CONFIG
+-- ══════════════════════════════════
+
+local Config          = _G.DragonConfigurations or {}
+local Moveset         = Config.Moveset         or "Y0"
+local MorphMod        = Config.MorphMod        or false
+local VoiceMod        = Config.VoiceMod        or true
+local CustomMorphSkin = Config.CustomMorphSkin or false
+local FeelTheHeat     = Config.FeelTheHeat     or true
+local AuraSyncAddOn   = Config.AuraSyncAddOn   or true
+
+if CustomMorphSkin and not MorphMod then
+    warn("CustomMorphSkin needs MorphMod = true. Turning it off.")
+    CustomMorphSkin = false
+end
+if Moveset ~= "Y0" and Moveset ~= "YK1" then
+    warn("Invalid moveset. Defaulting to Y0.")
+    Moveset = "Y0"
+end
+
+-- ══════════════════════════════════
+--   STYLE IDENTITY
+--   Y0  = deep crimson red
+--   YK1 = darker scarlet
+-- ══════════════════════════════════
+
+local StyleName = Moveset == "Y0" and "Dragon" or "Kiwami Dragon"
+local StyleColor = Moveset == "Y0"
+    and Color3.fromRGB(185, 10, 10)
+    or  Color3.fromRGB(135, 0, 25)
+local StyleSequence = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, StyleColor),
+    ColorSequenceKeypoint.new(1, StyleColor)
+})
+
+-- ══════════════════════════════════
+--   SERVICES
+-- ══════════════════════════════════
+
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local TweenService     = game:GetService("TweenService")
+local Debris           = game:GetService("Debris")
+local UserInputService = game:GetService("UserInputService")
+
+-- ══════════════════════════════════
+--   REFERENCES
+-- ══════════════════════════════════
+
+local plr        = Players.LocalPlayer
+local char       = plr.Character or plr.CharacterAdded:Wait()
+local pgui       = plr.PlayerGui
+local interf     = pgui.Interface
+local bt         = interf.Battle
+local main       = bt.Main
+local menu       = pgui.MenuUI.Menu
+local abil       = menu.Abilities.Frame.Frame.Frame
+local moves      = game.ReplicatedStorage.Moves
+local abilFolder = game.ReplicatedStorage.Abilities.Brawler
+local status     = plr.Status
+local RPS        = game.ReplicatedStorage
+
+-- ══════════════════════════════════
+--   BLOCK DUPLICATE RUNS
+-- ══════════════════════════════════
+
+local alreadyLoaded = RPS:FindFirstChild("DragonStyleMod")
+if alreadyLoaded then
+    local n = pgui:FindFirstChild("Notify")
+    if n and n:IsA("BindableEvent") then
+        n:Fire("Dragon Style mod is already running!")
+    end
+    return
+end
+local lock      = Instance.new("BoolValue")
+lock.Name       = "DragonStyleMod"
+lock.Value      = true
+lock.Parent     = RPS
+
+-- ══════════════════════════════════
+--   NOTIFICATION HELPERS
+-- ══════════════════════════════════
+
+local function sendNotif(text, color)
+    color = color or Color3.new(1, 1, 1)
+    local n = pgui:FindFirstChild("Notify")
+    if n and n:IsA("BindableEvent") then
+        n:Fire(text)
+    end
+end
+
+local function sendRedNotif(text)
+    local n = pgui:FindFirstChild("Notify")
+    if n and n:IsA("BindableEvent") then
+        pgui.NotifyUI.Awards.ChildAdded:Once(function(c)
+            if c.Text == text then
+                c.TextColor3 = Color3.fromRGB(200, 0, 0)
+                coroutine.wrap(function()
+                    local con
+                    con = RunService.RenderStepped:Connect(function()
+                        if not c then
+                            con:Disconnect()
+                            return
+                        end
+                        c.TextColor3 = Color3.fromRGB(200, 0, 0)
+                    end)
+                end)()
+            end
+        end)
+        n:Fire(text)
+    end
+end
+
+-- ══════════════════════════════════
+--   VALUE HELPER
+-- ══════════════════════════════════
+
+local function setValue(parent, name, value, class)
+    if not parent or not name or value == nil then return end
+    if not parent:FindFirstChild(name) then
+        local v      = Instance.new(class)
+        v.Name       = name
+        v.Parent     = parent
+    end
+    parent[name].Value = value
+end
+
+-- ══════════════════════════════════
+--   STATE CHECKS
+-- ══════════════════════════════════
+
+local function isInBattle()
+    return plr:FindFirstChild("InBattle") ~= nil
+end
+
+local function isDungeon()
+    return RPS.Dungeon.Value
+end
+
+local function doingHeatAction()
+    return char:FindFirstChild("Heated") ~= nil
+end
+
+local function showAuraBurst()
+    return isInBattle() and not doingHeatAction() and status.Heat.Value >= 100
+end
+
+-- ══════════════════════════════════
+--   SESSION TRACKERS
+-- ══════════════════════════════════
+
+local sessionTigerDrops  = 0
+local sessionHeatActions = 0
+local hasSetup           = false
+local hasReloaded        = false
+local connections        = { BattleStart = nil, StunParticle = nil }
+local stunParticle       = nil
+
+-- ══════════════════════════════════
+--   STANCE ANIMATION
+-- ══════════════════════════════════
+
+local stanceAnim          = Instance.new("Animation")
+stanceAnim.AnimationId    = "rbxassetid://12120045620"
+local stance              = char.Humanoid.Animator:LoadAnimation(stanceAnim)
+stance.Priority           = Enum.AnimationPriority.Movement
+
+sendNotif("loading " .. StyleName .. " style...", StyleColor)
+
+-- ══════════════════════════════════
+--   MOVE SWAPS
+--   Y0  = heavier slower combo
+--   YK1 = snappier Dragon of Dojima
+-- ══════════════════════════════════
+
+local function applyMoves()
+    moves.TigerDrop.Anim.AnimationId = "rbxassetid://12120052426"
+
+    local comboAt = Moveset == "Y0" and 0.35 or 0.30
+
+    moves["BAttack1"].Name = "OldAttack1"
+    moves["龍Attack1"].Name = "BAttack1"
+    setValue(moves["BAttack1"], "ComboAt", comboAt, "NumberValue")
+
+    moves["BAttack2"].Name = "OldAttack2"
+    moves["龍Attack2"].Name = "BAttack2"
+    setValue(moves["BAttack2"], "ComboAt", comboAt, "NumberValue")
+
+    moves["BAttack3"].Name = "OldAttack3"
+    moves["龍Attack3"].Name = "BAttack3"
+    setValue(moves["BAttack3"], "ComboAt", comboAt, "NumberValue")
+
+    moves["BAttack4"].Name = "OldAttack4"
+    moves["龍Attack4"].Name = "BAttack4"
+    setValue(moves["BAttack4"], "ComboAt", comboAt, "NumberValue")
+
+    moves["B2Strike4"].Name = "Old2Strike4"
+    moves["龍2Strike4"].Name = "B2Strike4"
+
+    moves["BStomp"].Anim.AnimationId = "rbxassetid://7546695030"
+
+    local s1 = moves["BStrike1"]
+    s1.Anim.AnimationId = "rbxassetid://8216285224"
+    setValue(s1, "EndAt",  0.75, "NumberValue")
+    setValue(s1, "HitDur", Moveset == "Y0" and 0.6 or 0.5, "NumberValue")
+    setValue(s1, "HitboxLocations",
+        '[["RightFoot",3,[0,0,0]],["RightLowerLeg",2.25,[0,0,0]],["RightUpperLeg",1.5,[0,0,0]]]',
+        "StringValue")
+
+    local s5 = moves["BStrike5"]
+    s5.Anim.AnimationId = "rbxassetid://7546691847"
+    setValue(s5, "MoveDuration", Moveset == "Y0" and 0.3  or 0.25, "NumberValue")
+    setValue(s5, "ComboAt",      Moveset == "Y0" and 0.6  or 0.55, "NumberValue")
+    setValue(s5, "HSize",        Moveset == "Y0" and 1.3  or 1.5,  "NumberValue")
+    setValue(s5, "HitboxLocations",
+        '[["RightFoot",1.5,[0,0,0]],["RightLowerLeg",0.75,[0,0,0]],["RightUpperLeg",0.5,[0,0,0]]]',
+        "StringValue")
+
+    local x2 = moves["B2Strike2"]
+    x2.Anim.AnimationId = "rbxassetid://11955435829"
+    setValue(x2, "HSize",        Moveset == "Y0" and 0.75 or 0.85, "NumberValue")
+    setValue(x2, "HSound",       "hardkick", "StringValue")
+    setValue(x2, "HitDur",       0.2,  "NumberValue")
+    setValue(x2, "MoveDuration", 0.3,  "NumberValue")
+    setValue(x2, "RagdollBonus", Moveset == "Y0" and 1.25 or 1.4, "NumberValue")
+    setValue(x2, "HitboxLocations",
+        '[["LeftFoot",1,[0,0,-0.5]],["LeftLowerLeg",2,[0,0,-0.5]],["LeftUpperLeg",2,[0,0,-0.5]]]',
+        "StringValue")
+
+    local x3 = moves["B2Strike3"]
+    x3.Anim.AnimationId = "rbxassetid://11809009022"
+    setValue(x3, "HitDur",         0.2,  "NumberValue")
+    setValue(x3, "MoveDuration",   0.3,  "NumberValue")
+    setValue(x3, "AniSpeed",       Moveset == "Y0" and 0.75 or 0.85, "NumberValue")
+    setValue(x3, "HSize",          Moveset == "Y0" and 0.75 or 0.85, "NumberValue")
+    setValue(x3, "RagdollBonus",   Moveset == "Y0" and 1.25 or 1.4,  "NumberValue")
+    setValue(x3, "HorizKnockback", Moveset == "Y0" and 0    or 0.1,  "NumberValue")
+    setValue(x3, "HitboxLocations",
+        '[["LeftHand",2,[0,0,0]],["RightHand",2,[0,0,0]]]',
+        "StringValue")
+
+    local x1 = moves["B2Strike1"]
+    x1.Anim.AnimationId = "rbxassetid://11826216628"
+    setValue(x1, "HitDur",         0.2,  "NumberValue")
+    setValue(x1, "MoveDuration",   Moveset == "Y0" and 0.5  or 0.4,  "NumberValue")
+    setValue(x1, "AniSpeed",       Moveset == "Y0" and 1    or 1.1,  "NumberValue")
+    setValue(x1, "HSize",          Moveset == "Y0" and 0.75 or 0.85, "NumberValue")
+    setValue(x1, "RagdollBonus",   Moveset == "Y0" and 1.25 or 1.5,  "NumberValue")
+    setValue(x1, "HorizKnockback", Moveset == "Y0" and 0.25 or 0.15, "NumberValue")
+    setValue(x1, "Reaction",       "Uppercut", "StringValue")
+    setValue(x1, "HitboxLocations",
+        '[["RightHand",2,[0,0,0]],["RightLowerArm",1.5,[0,0,0]],["RightUpperArm",1,[0,0,0]]]',
+        "StringValue")
+
+    sendNotif(StyleName .. " moves applied", StyleColor)
+end
+
+-- ══════════════════════════════════
+--   HEAT ACTIONS
+-- ══════════════════════════════════
+
+-- Ultimate Essence animation override
+main.HeatMove.TextLabel:GetPropertyChangedSignal("Text"):Connect(function()
+    if main.HeatMove.TextLabel.Text == "Ultimate Essence" then
+        local UEMove = moves:FindFirstChild("H_UltimateEssence")
+        if UEMove then
+            local anim = char.Humanoid:LoadAnimation(UEMove.Anim)
+            anim.Priority = Enum.AnimationPriority.Action4
+            anim:Play()
+            anim:Destroy()
+        end
+    end
+end)
+
+-- Sumo slap sounds at correct timings
+char.ChildAdded:Connect(function(child)
+    if child.Name == "Heated" then
+        local moveName = child:FindFirstChild("MoveName")
+        if moveName and moveName.Value == "Essence of Sumo Slapping" then
+            task.delay(0.1, function()
+                local s = RPS.Sounds:FindFirstChild("Slap")
+                if s then
+                    local clone        = Instance.new("Sound")
+                    clone.Parent       = char.Head
+                    clone.SoundId      = s.Value
+                    clone.Volume       = 0.35
+                    clone:Play()
+                    Debris:AddItem(clone, 3)
+                end
+            end)
+            task.delay(0.55, function()
+                local s = RPS.Sounds:FindFirstChild("Slap")
+                if s then
+                    local clone        = Instance.new("Sound")
+                    clone.Parent       = char.Head
+                    clone.SoundId      = s.Value
+                    clone.Volume       = 0.35
+                    clone:Play()
+                    Debris:AddItem(clone, 3)
+                end
+            end)
+            task.delay(1.0, function()
+                local s = RPS.Sounds:FindFirstChild("Slap")
+                if s then
+                    local clone        = Instance.new("Sound")
+                    clone.Parent       = char.Head
+                    clone.SoundId      = s.Value
+                    clone.Volume       = 0.35
+                    clone:Play()
+                    Debris:AddItem(clone, 3)
+                end
+            end)
+            task.delay(1.9, function()
+                local s = RPS.Sounds:FindFirstChild("MassiveSlap")
+                if s then
+                    local clone        = Instance.new("Sound")
+                    clone.Parent       = char.Head
+                    clone.SoundId      = s.Value
+                    clone.Volume       = 0.35
+                    clone:Play()
+                    Debris:AddItem(clone, 3)
+                end
+            end)
+        end
+    end
+end)
+
+-- ══════════════════════════════════
+--   VISUAL UPDATE (every frame)
+-- ══════════════════════════════════
+
+local function updateVisuals()
+    if status.Style.Value ~= "Brawler" then
+        char.UpperTorso["r2f_aura_burst"].Flare.Enabled  = false
+        char.UpperTorso["r2f_aura_burst"].Lines1.Enabled = false
+        if stance.IsPlaying then stance:Stop() end
+        char.HumanoidRootPart.Fire_Main.Rate      = 80
+        char.HumanoidRootPart.Fire_Secondary.Rate = 50
+        char.HumanoidRootPart.Lines1.Rate         = 20
+        char.HumanoidRootPart.Lines2.Rate         = 20
+        main.Heat.Fill.ImageColor3        = Color3.fromRGB(40, 150, 250)
+        main.Heat.Fill2.ImageColor3       = Color3.fromRGB(70, 250, 250)
+        main.Heat.ClimaxFill.ImageColor3  = Color3.fromRGB(180, 0, 0)
+        main.Heat.ClimaxFill2.ImageColor3 = Color3.fromRGB(250, 60, 100)
+        return
+    end
+
+    RPS.Styles.Brawler.VisualName.Value = StyleName
+    RPS.Styles.Brawler.Color.Value      = StyleColor
+    main.XP.Fill.ImageColor3            = StyleColor
+
+    local heat = status.Heat.Value
+    char.HumanoidRootPart.Fire_Main.Color      = StyleSequence
+    char.HumanoidRootPart.Fire_Secondary.Color = StyleSequence
+    char.HumanoidRootPart.Lines1.Color         = StyleSequence
+    char.HumanoidRootPart.Lines2.Color         = StyleSequence
+    char.HumanoidRootPart.Sparks.Color         = StyleSequence
+    char.HumanoidRootPart.Fire_Main.Rate       = heat >= 100 and 115 or heat >= 75 and 88 or 80
+    char.HumanoidRootPart.Fire_Secondary.Rate  = heat >= 100 and 92  or heat >= 75 and 80 or 70
+    char.HumanoidRootPart.Lines1.Rate          = heat >= 100 and 60  or heat >= 75 and 40 or 20
+    char.HumanoidRootPart.Lines2.Rate          = heat >= 100 and 60  or heat >= 75 and 40 or 20
+    if not char.HumanoidRootPart.TimeFor.Enabled then
+        char.HumanoidRootPart.TimeFor.Color = StyleSequence
+    end
+
+    char.UpperTorso["r2f_aura_burst"].Lines1.Color   = StyleSequence
+    char.UpperTorso["r2f_aura_burst"].Lines2.Color   = StyleSequence
+    char.UpperTorso["r2f_aura_burst"].Flare.Color    = StyleSequence
+    char.UpperTorso["r2f_aura_burst"].Smoke.Color    = StyleSequence
+    char.UpperTorso["r2f_aura_burst"].Lines1.Enabled = showAuraBurst()
+    char.UpperTorso["r2f_aura_burst"].Flare.Enabled  = showAuraBurst()
+    char.UpperTorso.Evading.Color                    = StyleSequence
+
+    main.Heat.Fill.ImageColor3        = Color3.fromRGB(165, 0, 0)
+    main.Heat.Fill2.ImageColor3       = Color3.fromRGB(240, 50, 110)
+    main.Heat.ClimaxFill.ImageColor3  = Color3.fromRGB(165, 0, 0)
+    main.Heat.ClimaxFill2.ImageColor3 = Color3.fromRGB(215, 25, 65)
+
+    if char:FindFirstChild("Heated") then
+        if not char.Heated:FindFirstChild("HeatedBy") then
+            main.HeatMove.ImageColor3          = Color3.fromRGB(255, 255, 255)
+            main.HeatMove.TextLabel.TextColor3 = Color3.fromRGB(220, 60, 60)
+        else
+            main.HeatMove.ImageColor3          = Color3.fromRGB(200, 0, 0)
+            main.HeatMove.TextLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        end
+    end
+
+    local renames = {
+        ["Guru Spin Counter [Front]"] = "Essence of Arm Reversal [Front]",
+        ["Guru Spin Counter [Left]"]  = "Essence of Arm Reversal [Left]",
+        ["Guru Spin Counter [Right]"] = "Essence of Arm Reversal [Right]",
+        ["Guru Spin Counter [Back]"]  = "Essence of Arm Reversal [Back]",
+        ["Guru Firearm Flip"]         = "Komaki Shot Stopper",
+    }
+    local lbl = main.HeatMove.TextLabel.Text
+    if renames[lbl] then main.HeatMove.TextLabel.Text = renames[lbl] end
+
+    if abil.Info.LvlHolder.Box.LvlHolder.Box.Fill.BackgroundColor3
+        == Color3.fromRGB(19, 157, 255)
+    then
+        abil.Info.LvlHolder.Box.LvlHolder.Box.Fill.BackgroundColor3 = StyleColor
+    end
+
+    local y0Names = {
+        ["Counter Hook"]      = "Komaki Tiger Drop (Lv.25)",
+        ["Guru Knockback"]    = "Komaki Knock Back",
+        ["Guru Parry"]        = "Komaki Parry (Lv.20)",
+        ["Guru Spin Counter"] = "Komaki Fist Reversal",
+        ["Guru Firearm Flip"] = "Komaki Shot Stopper",
+        ["Guru Dodge Shot"]   = "Komaki Evade & Strike",
+        ["Guru Safety Roll"]  = "Komaki Dharma Tumbler",
+        ["Time for Resolve"]  = "Dragon Spirit (Lv.20)",
+    }
+    local yk1Names = {
+        ["Counter Hook"]      = "Komaki Tiger Drop Kiwami (Lv.25)",
+        ["Guru Knockback"]    = "Komaki Knock Back",
+        ["Guru Parry"]        = "Komaki Parry Kiwami (Lv.20)",
+        ["Guru Spin Counter"] = "Komaki Fist Reversal Kiwami",
+        ["Guru Firearm Flip"] = "Komaki Shot Stopper",
+        ["Guru Dodge Shot"]   = "Komaki Evade & Strike",
+        ["Guru Safety Roll"]  = "Komaki Dharma Tumbler",
+        ["Time for Resolve"]  = "Kiwami Dragon Spirit (Lv.20)",
+        ["Ultimate Essence"]  = "Dragon of Dojima (Lv.30)",
+    }
+    local nameTable = Moveset == "Y0" and y0Names or yk1Names
+
+    for _, btn in pairs(abil.List.ListFrame:GetChildren()) do
+        if btn:IsA("ImageButton")
+            and btn:FindFirstChild("sty")
+            and btn.sty.Value == "Brawler"
+            and btn:FindFirstChild("MyColor")
+            and btn.MyColor.Value == Color3.fromRGB(19, 157, 255)
+        then
+            btn.MyColor.Value            = StyleColor
+            btn.Generic.Label.TextColor3 = StyleColor
+            if nameTable[btn.Name] then
+                btn.Generic.Label.Text = nameTable[btn.Name]
+            end
+        end
+    end
+
+    if Moveset == "Y0" then
+        abilFolder["Ultimate Essence"].Description.Value =
+            "The pinnacle of the Dragon of Dojima. Focus everything into one devastating strike that ends the fight."
+        abilFolder["Ultimate Essence"].Prompt.Value =
+            "HEAVY ATTACK near stunned enemy after Komaki Parry with Full Heat"
+        abilFolder["Time for Resolve"].Description.Value =
+            "Tap into the Dragon's willpower. While active you cannot be staggered or knocked off your feet."
+        abilFolder["Guru Parry"].Description.Value =
+            "One of the three ultimate Komaki techniques. Redirects an attack and leaves the enemy wide open."
+        abilFolder["Counter Hook"].Description.Value =
+            "One of the three ultimate Komaki techniques. A single brutal counter that sends enemies flying."
+        abilFolder["Guru Knockback"].Description.Value =
+            "One of the three ultimate Komaki techniques. Deflects an incoming attack and sends it straight back."
+    elseif Moveset == "YK1" then
+        abilFolder["Ultimate Essence"].Description.Value =
+            "The Dragon of Dojima evolved. Three rapid crushing strikes that leave nothing standing."
+        abilFolder["Ultimate Essence"].Prompt.Value =
+            "HEAVY ATTACK near stunned enemy after Komaki Parry with Full Heat"
+        abilFolder["Time for Resolve"].Description.Value =
+            "The Kiwami Dragon's unbreakable will. Stronger than ever, almost nothing can knock you down."
+        abilFolder["Guru Parry"].Description.Value =
+            "Kiwami refined Komaki technique. A precise parry that stuns any enemy who dares to swing first."
+        abilFolder["Counter Hook"].Description.Value =
+            "Kiwami Tiger Drop. Tighter timing, bigger payoff, the hardest hitting counter in the style."
+        abilFolder["Guru Knockback"].Description.Value =
+            "Kiwami refined Komaki technique. Sends the enemy's attack back with twice the original force."
+    end
+
+    main.Heat.noheattho.Text = "Heat Actions Unavailable"
+    main.Heat.noheattho.Size = UDim2.new(10, 0, 1, 0)
+end
+
+-- ══════════════════════════════════
+--   VOICE MOD
+--   Kiryu voice for Y0 and YK1
+--   Shows in red text when loaded
+-- ══════════════════════════════════
+
+if VoiceMod then
+    _G.voicepack = "Kiryu"
+    _G.voice     = RPS.Voices:FindFirstChild(_G.voicepack)
+
+    if _G.voice then
+        sendRedNotif("Kiryu voice mod loaded")
+        sendRedNotif("Selected voice: " .. _G.voice.Name)
+
+        local function playVoice(sound)
+            local clone        = Instance.new("Sound")
+            clone.Parent       = char.Head
+            clone.Name         = sound.Name
+            clone.SoundId      = sound.Value
+            clone.Volume       = 0.35
+            clone:Play()
+            clone.Ended:Connect(function()
+                Debris:AddItem(clone)
+            end)
+        end
+
+        local function getRandom(folder)
+            local list = folder:GetChildren()
+            return list[math.random(1, #list)]
+        end
+
+        plr.ChildAdded:Connect(function(child)
+            if child.Name == "InBattle" then
+                playVoice(getRandom(_G.voice.BattleStart))
+            end
+        end)
+
+        local hitCD = false
+        char.ChildAdded:Connect(function(child)
+            if child.Name == "Heated" then
+                local heating = child:WaitForChild("Heating", 0.5)
+                if heating and heating.Value ~= char then
+                    if not child:WaitForChild("Throwing", 0.5) then
+                        playVoice(getRandom(_G.voice.HeatAction))
+                    end
+                end
+            end
+            if child.Name == "Hitstunned"
+                and not char:FindFirstChild("Ragdolled")
+            then
+                if not hitCD then
+                    hitCD = true
+                    playVoice(getRandom(_G.voice.Pain))
+                    delay(2, function() hitCD = false end)
+                end
+            end
+            if child.Name == "Ragdolled" then
+                playVoice(getRandom(_G.voice.Knockdown))
+            end
+            if child.Name == "ImaDea" then
+                playVoice(getRandom(_G.voice.Death))
+            end
+            if child.Name == "Stunned" then
+                playVoice(getRandom(_G.voice.Stun))
+            end
+        end)
+
+        char.ChildRemoved:Connect(function(child)
+            if child.Name == "Ragdolled" then
+                task.wait(0.1)
+                if not string.match(status.CurrentMove.Value.Name, "Getup") then
+                    playVoice(getRandom(_G.voice.Recover))
+                end
+            end
+        end)
+
+        char.HumanoidRootPart.ChildAdded:Connect(function(child)
+            if child.Name == "KnockOut" or child.Name == "KnockOutRare" then
+                child.Volume = 0
+            end
+        end)
+
+        local silentTaunt            = RPS.Sounds:FindFirstChild("Laugh"):Clone()
+        silentTaunt.Parent           = RPS.Sounds
+        silentTaunt.Name             = "SilentTaunt"
+        silentTaunt.Volume.Value     = 0
+        moves.Taunt.Sound.Value      = "SilentTaunt"
+        moves.RushTaunt.Sound.Value  = "SilentTaunt"
+        moves.GoonTaunt.Sound.Value  = "SilentTaunt"
+
+        status.Taunting.Changed:Connect(function()
+            if status.Taunting.Value == true
+                and status.CurrentMove.Value.Name ~= "BeastTaunt"
+            then
+                playVoice(getRandom(_G.voice.Taunt))
+            end
+        end)
+
+        local lightCD = false
+        status.CurrentMove.Changed:Connect(function()
+            local name = status.CurrentMove.Value.Name
+            if string.match(name, "Attack") or string.match(name, "Punch") then
+                if not lightCD then
+                    lightCD = true
+                    playVoice(getRandom(_G.voice.LightAttack))
+                    delay(0.35, function() lightCD = false end)
+                end
+            elseif not string.match(name, "Taunt")
+                and not string.match(name, "Grab")
+            then
+                playVoice(getRandom(_G.voice.HeavyAttack))
+            end
+        end)
+
+        local dodgeCD = false
+        status.FFC.Evading.Changed:Connect(function()
+            if status.FFC.Evading.Value == true
+                and char:FindFirstChild("BeingHacked")
+                and not dodgeCD
+            then
+                dodgeCD = true
+                playVoice(getRandom(_G.voice.Dodge))
+                delay(10, function() dodgeCD = false end)
+            end
+        end)
+
+        -- Press H to cycle voice packs
+        UserInputService.InputBegan:Connect(function(key)
+            if UserInputService:GetFocusedTextBox() == nil then
+                if key.KeyCode == Enum.KeyCode.H then
+                    if _G.voicepack == "Kiryu" then
+                        _G.voicepack = "Akiyama"
+                    elseif _G.voicepack == "Akiyama" then
+                        _G.voicepack = "Majima"
+                    elseif _G.voicepack == "Majima" then
+                        _G.voicepack = "Vulcan"
+                    elseif _G.voicepack == "Vulcan" then
+                        _G.voicepack = "Kiryu"
+                    end
+                    _G.voice = RPS.Voices:FindFirstChild(_G.voicepack)
+                    sendRedNotif("Selected voice: " .. _G.voice.Name)
+                end
+            end
+        end)
+
+    else
+        sendRedNotif("VoiceMod: Kiryu voice not found")
+    end
+end
+
+-- ══════════════════════════════════
+--   MORPH MOD
+--   Loads Kiryu morph instantly
+--   Shows in red text when loaded
+-- ══════════════════════════════════
+
+if MorphMod then
+    _G.Morph = Moveset == "Y0" and "Kiryu" or "Kiryu Kiwami"
+
+    sendRedNotif("Kiryu morph mod loaded")
+    sendRedNotif("Morph: " .. _G.Morph)
+
+    local morphLock = RPS:FindFirstChild("CharacterMorphMod")
+    if not morphLock then
+        local v   = Instance.new("BoolValue")
+        v.Name    = "CharacterMorphMod"
+        v.Value   = true
+        v.Parent  = RPS
+    end
+
+    local function applyMorph()
+        local morphFolder = RPS:FindFirstChild("CharacterMorphs")
+        if not morphFolder then return end
+        local target = morphFolder:FindFirstChild(_G.Morph)
+        if not target then return end
+        for _, part in pairs(target:GetChildren()) do
+            local charPart = char:FindFirstChild(part.Name)
+            if charPart then
+                for _, mesh in pairs(part:GetChildren()) do
+                    if mesh:IsA("SpecialMesh") then
+                        local existing = charPart:FindFirstChildOfClass("SpecialMesh")
+                        if existing then
+                            existing.MeshId    = mesh.MeshId
+                            existing.TextureId = mesh.TextureId
+                            existing.Scale     = mesh.Scale
+                        end
+                    end
+                end
+                if part:IsA("BasePart") then
+                    charPart.Color = part.Color
+                end
+            end
+        end
+    end
+
+    applyMorph()
+
+    char.DescendantAdded:Connect(function(desc)
+        if desc:IsA("SpecialMesh") then
+            applyMorph()
+        end
+    end)
+
+    if CustomMorphSkin then
+        for _, part in pairs(char:GetChildren()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                part.Color = StyleColor
+            end
+        end
+        sendRedNotif("CustomMorphSkin applied")
+    end
+end
+
+-- ══════════════════════════════════
+--   ONE TIME SETUP
+-- ══════════════════════════════════
+
+local function setupOnce()
+    if hasSetup then return end
+    hasSetup = true
+
+    sendNotif("setting up " .. StyleName .. "...", StyleColor)
+
+    StyleSequence = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, StyleColor),
+        ColorSequenceKeypoint.new(1, StyleColor)
+    })
+
+    abil.Tabs.Tabs.Brawler.Filled.Title.Text = StyleName
+    status.Stats.Kills_Brawler.Visual.Value  = "Enemies beaten in " .. StyleName .. " style"
+    RPS.Styles.Brawler.Idle.AnimationId      = "rbxassetid://12120045620"
+
+    applyMoves()
+
+    -- Heat shimmer at 50+ heat
+    if not main.Heat:FindFirstChild("HeatShimmer") then
+        local shimmer              = main.Heat.Fill2:Clone()
+        shimmer.Name               = "HeatShimmer"
+        shimmer.Parent             = main.Heat
+        shimmer.ImageColor3        = Color3.fromRGB(255, 255, 255)
+        shimmer.ImageTransparency  = 1
+        shimmer.Visible            = false
+        main.Heat.Fill2.Changed:Connect(function()
+            shimmer.Size = main.Heat.Fill2.Size
+        end)
+        TweenService:Create(shimmer,
+            TweenInfo.new(0.3, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, math.huge, true),
+            { ImageTransparency = 0.4 }
+        ):Play()
+        coroutine.wrap(function()
+            while true do
+                RunService.RenderStepped:Wait()
+                if char:FindFirstChild("Heated")
+                    and not char.Heated:FindFirstChild("Throwing")
+                    and char.Heated:FindFirstChild("Heating")
+                    and char.Heated.Heating.Value ~= char
+                then
+                    shimmer.ImageColor3 = Color3.fromRGB(0, 200, 0)
+                else
+                    shimmer.ImageColor3 = Color3.fromRGB(255, 255, 255)
+                end
+            end
+        end)()
+        local function refreshShimmer()
+            shimmer.Visible = status.Heat.Value >= 50
+        end
+        status.Heat.Changed:Connect(refreshShimmer)
+        refreshShimmer()
+    end
+
+    -- Climax shimmer at 100 heat
+    if not main.Heat:FindFirstChild("ClimaxShimmer") then
+        local cs               = main.Heat.ClimaxFill2:Clone()
+        cs.Name                = "ClimaxShimmer"
+        cs.Parent              = main.Heat
+        cs.ImageColor3         = Color3.fromRGB(255, 255, 255)
+        cs.ImageTransparency   = 1
+        cs.Visible             = false
+        main.Heat.ClimaxFill2.Changed:Connect(function()
+            cs.Size = main.Heat.ClimaxFill2.Size
+        end)
+        TweenService:Create(cs,
+            TweenInfo.new(0.3, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, math.huge, true),
+            { ImageTransparency = 0.4 }
+        ):Play()
+        coroutine.wrap(function()
+            while true do
+                RunService.RenderStepped:Wait()
+                if char:FindFirstChild("Heated")
+                    and not char.Heated:FindFirstChild("Throwing")
+                    and char.Heated:FindFirstChild("Heating")
+                    and char.Heated.Heating.Value ~= char
+                then
+                    cs.ImageColor3 = Color3.fromRGB(0, 200, 0)
+                else
+                    cs.ImageColor3 = Color3.fromRGB(255, 255, 255)
+                end
+            end
+        end)()
+        local function refreshClimax()
+            cs.Visible = status.Heat.Value >= 100
+        end
+        status.Heat.Changed:Connect(refreshClimax)
+        refreshClimax()
+    end
+
+    -- Stun particle for Komaki Parry targets
+    if stunParticle == nil then
+        stunParticle         = char.Head.FS:Clone()
+        stunParticle.Rate    = 500
+        stunParticle.Enabled = false
+        stunParticle.Parent  = RPS
+        stunParticle.Name    = "DragonStunParticle"
+    end
+
+    if connections.StunParticle == nil then
+        connections.StunParticle = char.ChildAdded:Connect(function(child)
+            if status.Styles.Brawler:FindFirstChild("Ultimate Essence") then
+                task.wait(0.1)
+                if child.Name == "Heated" then
+                    if child:FindFirstChild("MoveName") then
+                        sessionHeatActions += 1
+                        if sessionHeatActions % 10 == 0 then
+                            sendNotif("heat actions this session: [" .. sessionHeatActions .. "]",
+                                Color3.fromRGB(0, 200, 0))
+                        end
+                    end
+                    if child:FindFirstChild("Throwing") and child:FindFirstChild("Heating") then
+                        local target = child.Heating.Value
+                        local t = 3
+                        repeat task.wait(0.05) t -= 0.05
+                        until target:FindFirstChild("Stunned") or not target or t <= 0
+                        if target and target:FindFirstChild("Stunned")
+                            and target.Stunned:FindFirstChild("Guru")
+                        then
+                            if not target.Head:FindFirstChild("DragonStunParticle") then
+                                local p      = stunParticle:Clone()
+                                p.Parent     = target.Head
+                                p.Color      = StyleSequence
+                                p.Enabled    = true
+                                coroutine.wrap(function()
+                                    while target:FindFirstChild("Stunned") do
+                                        RunService.RenderStepped:Wait()
+                                        p.Color = StyleSequence
+                                    end
+                                    p:Destroy()
+                                end)()
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+
+    -- Encounter title renames
+    local function refreshTitle()
+        local t = interf.BattleStart.Text
+        if t == "LEGENDARY DRAGON" then
+            interf.BattleStart.Text = "THE CRIMSON DRAGON"
+        elseif t == "MYSTERIOUS MERCS" then
+            interf.BattleStart.Text = "SUITS IN THE DARK"
+        elseif t == "DELINQUENTS" then
+            local r = math.random(1, 3)
+            interf.BattleStart.Text = r == 1 and "STREET PUNKS" or r == 2 and "CORNER BOYS" or "DELINQUENTS"
+        elseif t == "RICH FIEND" then
+            interf.BattleStart.Text = "SILVER SPOON THUG"
+        elseif t == "GORILLAMAN" then
+            interf.BattleStart.Text = math.random(1, 2) == 1 and "THE BEAST" or "KNUCKLE DRAGGER"
+        elseif t == "HUE" then
+            interf.BattleStart.Text = "COPYCAT"
+        elseif t == "BLOODSUCKER" then
+            local r = math.random(1, 3)
+            interf.BattleStart.Text = r == 1 and "THE NIGHT CRAWLER" or r == 2 and "SHADOW PUNK" or "BLOODSUCKER"
+        end
+    end
+    if connections.BattleStart == nil then
+        connections.BattleStart = interf.BattleStart.Changed:Connect(refreshTitle)
+    end
+
+    -- NPC dialogues
+    if not isDungeon() then
+        workspace.Map.MiniQuests["Helen"].Dialogue.Dialog.Value =
+            [[I heard there is someone out there who fights like they have got nothing to lose. You remind me of them a little.]]
+        workspace.Map.MiniQuests["Jort"].Dialogue.Dialog.Value =
+            [[My buddy swears he saw someone take out five guys in under a minute near the docks. Said the guy did not even break a sweat.]]
+        workspace.Map.MiniQuests["Fisherman Jimbo"].Dialogue.Dialog.Value =
+            [[You have got that look. Like you have been through it and came out the other side just fine.]]
+        workspace.Map.MiniQuests["Fisherman Quill"].Dialogue.Dialog.Value =
+            [[Rough waters today, kid. Some days you fight the tide, some days you ride it. Sounds like you already know which one you are.]]
+        workspace.Map.MiniQuests["Anderson"].Dialogue.Dialog.Value =
+            [[You solve everything with your fists and leave the paperwork to the rest of us.]]
+    end
+
+    menu.Bars.Mobile_Title.Text    = StyleName .. " Dragon Style Mod"
+    menu.Bars.Mobile_Title.Visible = true
+
+    if not hasReloaded then
+        hasReloaded = true
+        local savedCF = char.LowerTorso.CFrame
+        sendNotif("reloading to apply changes...", StyleColor)
+        interf.Client.Disabled = true
+        task.wait()
+        interf.Client.Disabled = false
+        task.wait(0.1)
+        char.LowerTorso.CFrame = savedCF
+    end
+end
+
+-- ══════════════════════════════════
+--   DEATH SCREEN
+--   Y0  = blunt stoic lines
+--   YK1 = dramatic Kiwami lines
+-- ══════════════════════════════════
+
+local deathFilter        = Instance.new("ColorCorrectionEffect")
+deathFilter.Name         = "DragonDeathFilter"
+deathFilter.Parent       = workspace.CurrentCamera
+
+local function playDeathFilter()
+    TweenService:Create(deathFilter,
+        TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+        { TintColor = Color3.fromRGB(255, 180, 180), Saturation = -1, Brightness = -0.5 }
+    ):Play()
+    task.wait(0.4)
+    repeat RunService.RenderStepped:Wait() until status.Health.Value > 0
+    TweenService:Create(deathFilter,
+        TweenInfo.new(1.5, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+        { TintColor = Color3.fromRGB(255, 255, 255), Saturation = 0, Brightness = 0 }
+    ):Play()
+end
+
+local function showDeathMessage(text)
+    local label                  = Instance.new("TextLabel")
+    label.Parent                 = interf
+    label.Text                   = ""
+    label.Size                   = UDim2.new(1, 0, 1, 0)
+    label.Position               = UDim2.new(0.5, 0, 0.5, 0)
+    label.AnchorPoint            = Vector2.new(0.5, 0.5)
+    label.BackgroundTransparency = 1
+    label.TextSize               = 58
+    label.TextStrokeTransparency = 0.5
+    label.TextColor3             = Color3.fromRGB(255, 255, 255)
+    label.FontFace               = Font.fromEnum(Enum.Font.Antique)
+    for i = 1, #text do
+        label.Text = string.sub(text, 1, i)
+        task.wait(0.025)
+    end
+    task.wait(0.1)
+    repeat RunService.RenderStepped:Wait() until status.Health.Value > 0
+    TweenService:Create(label,
+        TweenInfo.new(1.25, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+        { Size = UDim2.new(1.15, 0, 1.15, 0), TextTransparency = 1, TextStrokeTransparency = 1 }
+    ):Play()
+    Debris:AddItem(label, 1.25)
+end
+
+status.Health.Changed:Connect(function()
+    if status.Health.Value <= 0 then
+        task.wait()
+        if not char:FindFirstChild("ImaDea") then return end
+        local y0Lines = {
+            "That all you got?",
+            "Get back up. You are not done yet.",
+            "The Dragon does not stay down.",
+            "Shake it off. You have been through worse.",
+            "Even the strongest fall sometimes. Get up.",
+            "Is that really the best the Y0 style can do?",
+            "You got dropped. Do not let it happen again.",
+        }
+        local yk1Lines = {
+            "The Kiwami Dragon... not today.",
+            "You have come too far to stop here.",
+            "Get up. The Dragon of Dojima does not end like this.",
+            "That hurt. Good. Remember it.",
+            "A Kiwami fighter does not stay on the ground.",
+            "You trained for this. Start showing it.",
+            "Not your best. You know that.",
+        }
+        local pool   = Moveset == "YK1" and yk1Lines or y0Lines
+        local chosen = pool[math.random(1, #pool)]
+        local arena  = status.MyArena.Value
+        if arena and arena:FindFirstChild("AI")
+            and arena.AI:FindFirstChild("Object")
+            and arena.AI.Object.Value
+            and arena.AI.Object.Value.Name == "Legendary Dragon"
+        then
+            chosen = "Only one Dragon stands at the top."
+        end
+        coroutine.wrap(showDeathMessage)(chosen)
+        coroutine.wrap(playDeathFilter)()
+    end
+end)
+
+-- ══════════════════════════════════
+--   SESSION STAT NOTIFICATIONS
+-- ══════════════════════════════════
+
+status.AttackBegan.Changed:Connect(function()
+    if status.AttackBegan.Value == true then
+        if status.CurrentMove.Value.Name == "TigerDrop" then
+            sessionTigerDrops += 1
+            if sessionTigerDrops % 10 == 0 then
+                sendNotif("tiger drops this session: [" .. sessionTigerDrops .. "]",
+                    Color3.fromRGB(0, 200, 0))
+            end
+            if sessionTigerDrops == 100 then
+                sendNotif("100 tiger drops. you ARE the dragon.", StyleColor)
+            end
+        end
+    end
+end)
+
+status.Level.Changed:Connect(function()
+    if status.Level.Value % 5 == 0 then
+        sendNotif("level [" .. status.Level.Value .. "] reached", Color3.fromRGB(0, 200, 0))
+    end
+end)
+
+status.Resets.Changed:Connect(function()
+    sendNotif("prestige [" .. status.Resets.Value .. "] achieved", Color3.fromRGB(0, 200, 0))
+end)
+
+status.Stats.Deaths.Changed:Connect(function()
+    sendNotif("deaths: [" .. status.Stats.Deaths.Value .. "]", Color3.fromRGB(200, 0, 0))
+end)
+
+status.Stats.Kills_Brawler.Changed:Connect(function()
+    if status.Stats.Kills_Brawler.Value % 50 == 0 then
+        sendNotif(StyleName .. " kills: [" .. status.Stats.Kills_Brawler.Value .. "]",
+            Color3.fromRGB(0, 200, 0))
+    end
+end)
+
+status.Stats.Kills.Changed:Connect(function()
+    if status.Stats.Kills.Value % 50 == 0 then
+        sendNotif("total kills: [" .. status.Stats.Kills.Value .. "]",
+            Color3.fromRGB(0, 200, 0))
+    end
+end)
+
+-- ══════════════════════════════════
+--   MAIN LOOPS
+-- ══════════════════════════════════
+
+RunService.RenderStepped:Connect(updateVisuals)
+
+coroutine.wrap(function()
+    while true do
+        setupOnce()
+        task.wait(5)
+    end
+end)()
+
+sendNotif("mod loaded", Color3.fromRGB(0, 200, 0))
+task.wait(2)
+sendNotif(StyleName .. " active | " .. (Moveset == "Y0" and "Yakuza 0" or "Yakuza Kiwami 1") .. " moveset", StyleColor)
