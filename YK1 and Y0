@@ -7,9 +7,7 @@ _G.DragonConfigurations = {
   Moveset = "Y0", -- Y0 or YK1
   MorphMod = false, -- true or false
   VoiceMod = true, -- true or false
-  CustomMorphSkin = false, -- true or false
-  FeelTheHeat = true, -- true or false
-  AuraSyncAddOn = true -- true or false
+  
 }
 Y0 is the Yakuza 0 Dragon Style moveset.
 YK1 is the Yakuza Kiwami 1 Dragon Style moveset.
